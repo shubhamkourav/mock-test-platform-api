@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Exam } from '../models/Exam';
 import { Section } from '../models/Section';
 import { ok } from '../utils/response';
+import { ApiError } from '../utils/apiError';
 
 export async function listExams(req: Request, res: Response) {
   const filter = { isActive: req.query.includeInactive === 'true' ? { $in: [true, false] } : true };
@@ -21,8 +22,12 @@ export async function updateExam(req: Request, res: Response) {
   return ok(res, exam, 'Exam updated');
 }
 export async function listSections(req: Request, res: Response) {
-  return ok(res, await Section.find({ examId: req.params.id, isActive: true }).sort({ order: 1 }));
+  const exam = await Exam.findOne({ _id: req.params.id, isActive: true });
+  if (!exam) throw new ApiError(404, 'Exam not found', 'EXAM_NOT_FOUND');
+  return ok(res, await Section.find({ examId: exam.id, isActive: true }).sort({ order: 1 }));
 }
 export async function createSection(req: Request, res: Response) {
-  return ok(res, await Section.create(req.body), 'Section created', 201);
+  const exam = await Exam.findOne({ _id: req.params.id, isActive: true });
+  if (!exam) throw new ApiError(404, 'Exam not found', 'EXAM_NOT_FOUND');
+  return ok(res, await Section.create({ ...req.body, examId: exam.id }), 'Section created', 201);
 }

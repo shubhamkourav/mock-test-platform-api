@@ -5,7 +5,7 @@ const schema = new Schema({
   questionId: { type: Schema.Types.ObjectId, ref: 'Question', required: true, index: true },
   sectionId: { type: Schema.Types.ObjectId, ref: 'Section' },
   order: { type: Number, required: true, min: 1 },
-  marks: { type: Number },
+  marks: { type: Number, required: true, min: 0 },
 }, { timestamps: true });
 
 schema.index({ testId: 1, questionId: 1 }, { unique: true });

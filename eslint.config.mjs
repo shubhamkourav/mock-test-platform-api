@@ -1,11 +1,14 @@
-export default [
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  { ignores: ['dist/**', 'node_modules/**'] },
+  ...tseslint.configs.recommended,
   {
-    ignores: ['dist/**', 'node_modules/**'],
-  },
-  {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'tests/**/*.ts'],
     rules: {
       'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
-];
+);

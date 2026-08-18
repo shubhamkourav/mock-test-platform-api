@@ -6,130 +6,14 @@ import { TestQuestion } from '../models/TestQuestion';
 import { Question } from '../models/Question';
 import { ApiError } from '../utils/apiError';
 import { ok } from '../utils/response';
+import { validateTestForPublish } from '../services/testValidation';
 
-export async function createAttempt(req: Request, res: Response) {
-  const test = await Test.findOne({ _id: req.body.testId, isPublished: true });
-  if (!test) throw new ApiError(404, 'Published test not found', 'TEST_NOT_FOUND');
-
-  const attempt = await Attempt.create({
-    userId: req.user!.id,
-    testId: test.id,
-  });
-
-  const questions = await TestQuestion.find({ testId: test.id })
-    .populate({ path: 'questionId', select: 'questionText options subjectTag topic difficulty defaultMarks negativeMarks' })
-    .sort({ order: 1 })
-    .lean();
-
-  return ok(res, { attempt, questions }, 'Attempt started', 201);
-}
-
-export async function getAttempt(req: Request, res: Response) {
-  const attempt = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id });
-  if (!attempt) throw new ApiError(404, 'Attempt not found', 'NOT_FOUND');
-
-  const answers = await AttemptAnswer.find({ attemptId: attempt.id }).select(
-    'questionId selectedOptions markedForReview timeSpentSeconds isAttempted',
-  );
-  return ok(res, { attempt, answers });
-}
-
-export async function saveAnswer(req: Request, res: Response) {
-  const attempt = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id, status: 'in_progress' });
-  if (!attempt) throw new ApiError(404, 'Active attempt not found', 'ATTEMPT_NOT_FOUND');
-
-  const question = await Question.findOne({ _id: req.body.questionId, isActive: true });
-  if (!question) throw new ApiError(404, 'Question not found', 'QUESTION_NOT_FOUND');
-
-  const selected = [...new Set(req.body.selectedOptions as string[])].sort();
-  const correct = [...question.correctOptions].sort();
-  const isAttempted = selected.length > 0;
-  const isCorrect = isAttempted && selected.length === correct.length && selected.every((v, i) => v === correct[i]);
-  const marks = isCorrect ? question.defaultMarks : (isAttempted ? -question.negativeMarks : 0);
-
-  const answer = await AttemptAnswer.findOneAndUpdate(
-    { attemptId: attempt.id, questionId: question.id },
-    {
-      $set: {
-        selectedOptions: selected,
-        isAttempted,
-        isCorrect,
-        markedForReview: req.body.markedForReview,
-        timeSpentSeconds: req.body.timeSpentSeconds,
-        marksObtained: marks,
-        questionSnapshot: {
-          questionText: question.questionText,
-          options: question.options,
-          correctOptions: question.correctOptions,
-          marks: question.defaultMarks,
-          negativeMarks: question.negativeMarks,
-          topic: question.topic,
-          subjectTag: question.subjectTag,
-        },
-      },
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
-  );
-
-  return ok(res, answer, 'Answer saved');
-}
-
-export async function submitAttempt(req: Request, res: Response) {
-  const attempt = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id, status: 'in_progress' });
-  if (!attempt) throw new ApiError(404, 'Active attempt not found', 'ATTEMPT_NOT_FOUND');
-
-  const test = await Test.findById(attempt.testId);
-  if (!test) throw new ApiError(404, 'Test not found', 'TEST_NOT_FOUND');
-
-  const answers = await AttemptAnswer.find({ attemptId: attempt.id });
-  const testQuestions = await TestQuestion.find({ testId: test.id }).lean();
-
-  const attempted = answers.filter(a => a.isAttempted).length;
-  const correct = answers.filter(a => a.isCorrect).length;
-  const incorrect = answers.filter(a => a.isAttempted && !a.isCorrect).length;
-  const unattempted = Math.max(testQuestions.length - attempted, 0);
-  const score = answers.reduce((sum, a) => sum + a.marksObtained, 0);
-  const endTime = new Date();
-  const timeTakenSeconds = Math.max(0, Math.floor((endTime.getTime() - attempt.startTime.getTime()) / 1000));
-
-  attempt.endTime = endTime;
-  attempt.totalScore = score;
-  attempt.correctCount = correct;
-  attempt.incorrectCount = incorrect;
-  attempt.unattemptedCount = unattempted;
-  attempt.timeTakenSeconds = timeTakenSeconds;
-  attempt.status = req.body.autoSubmitted ? 'auto_submitted' : 'completed';
-  await attempt.save();
-
-  return ok(res, attempt, 'Attempt submitted');
-}
-
-export async function result(req: Request, res: Response) {
-  const attempt = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id });
-  if (!attempt) throw new ApiError(404, 'Attempt not found', 'NOT_FOUND');
-  if (attempt.status === 'in_progress') throw new ApiError(400, 'Attempt is not submitted yet', 'NOT_SUBMITTED');
-
-  const answers = await AttemptAnswer.find({ attemptId: attempt.id }).lean();
-  const topicMap = new Map<string, { attempted: number; correct: number; score: number }>();
-  for (const answer of answers) {
-    const topic = answer.questionSnapshot?.topic ?? 'Unknown';
-    const current = topicMap.get(topic) ?? { attempted: 0, correct: 0, score: 0 };
-    if (answer.isAttempted) current.attempted += 1;
-    if (answer.isCorrect) current.correct += 1;
-    current.score += answer.marksObtained;
-    topicMap.set(topic, current);
-  }
-
-  return ok(res, {
-    attempt,
-    accuracy: attempt.correctCount + attempt.incorrectCount
-      ? Number(((attempt.correctCount / (attempt.correctCount + attempt.incorrectCount)) * 100).toFixed(2))
-      : 0,
-    topics: [...topicMap.entries()].map(([topic, value]) => ({
-      topic,
-      ...value,
-      accuracy: value.attempted ? Number(((value.correct / value.attempted) * 100).toFixed(2)) : 0,
-    })),
-    answers,
-  });
-}
+function isExpired(attempt: { startTime: Date }, durationMinutes: number, now = new Date()) { return now.getTime() >= attempt.startTime.getTime() + durationMinutes * 60_000; }
+function scoreAnswer(selectedOptions: string[], correctOptions: string[], marks: number, negativeMarks: number) { const selected = [...new Set(selectedOptions)].sort(); const correct = [...new Set(correctOptions)].sort(); const isAttempted = selected.length > 0; const isCorrect = isAttempted && selected.length === correct.length && selected.every((value, index) => value === correct[index]); return { selected, isAttempted, isCorrect, marksObtained: isCorrect ? marks : isAttempted ? -negativeMarks : 0 }; }
+async function calculateAttempt(attemptId: string, testId: string) { const answers = await AttemptAnswer.find({ attemptId }).lean(); const testQuestions = await TestQuestion.find({ testId }).lean(); const questionIds = new Set(testQuestions.map(item => item.questionId.toString())); const validAnswers = answers.filter(answer => questionIds.has(answer.questionId.toString())); const attempted = validAnswers.filter(answer => answer.isAttempted).length; const correct = validAnswers.filter(answer => answer.isCorrect).length; const incorrect = validAnswers.filter(answer => answer.isAttempted && !answer.isCorrect).length; const unattempted = Math.max(testQuestions.length - attempted, 0); const score = validAnswers.reduce((sum, answer) => sum + answer.marksObtained, 0); const sectionResults = [...new Set(testQuestions.map(item => item.sectionId?.toString()).filter(Boolean))].map(sectionId => { const sectionQuestions = testQuestions.filter(item => item.sectionId?.toString() === sectionId); const ids = new Set(sectionQuestions.map(item => item.questionId.toString())); const sectionAnswers = validAnswers.filter(answer => ids.has(answer.questionId.toString())); const sectionAttempted = sectionAnswers.filter(answer => answer.isAttempted).length; const sectionCorrect = sectionAnswers.filter(answer => answer.isCorrect).length; const sectionIncorrect = sectionAnswers.filter(answer => answer.isAttempted && !answer.isCorrect).length; return { sectionId, attempted: sectionAttempted, correct: sectionCorrect, incorrect: sectionIncorrect, unattempted: Math.max(sectionQuestions.length - sectionAttempted, 0), score: sectionAnswers.reduce((sum, answer) => sum + answer.marksObtained, 0), timeSpentSeconds: sectionAnswers.reduce((sum, answer) => sum + answer.timeSpentSeconds, 0) }; }); return { attempted, correct, incorrect, unattempted, score, sectionResults }; }
+export async function createAttempt(req: Request, res: Response) { const test = await Test.findOne({ _id: req.body.testId, isPublished: true }); if (!test) throw new ApiError(404, 'Published test not found', 'TEST_NOT_FOUND'); await validateTestForPublish(test); const testQuestions = await TestQuestion.find({ testId: test._id }).lean(); if (testQuestions.length !== test.totalQuestions || testQuestions.length === 0) throw new ApiError(409, 'Test configuration is invalid', 'INVALID_TEST_CONFIGURATION'); const existing = await Attempt.findOne({ userId: req.user!.id, testId: test._id, status: 'in_progress' }); if (existing) { if (test.settings?.allowResume !== false && !isExpired(existing, test.durationMinutes)) { const questions = await TestQuestion.find({ testId: test._id }).populate({ path: 'questionId', select: 'questionText options subjectTag topic difficulty defaultMarks negativeMarks' }).sort({ order: 1 }).lean(); return ok(res, { attempt: existing, questions }, 'Existing attempt resumed'); } if (isExpired(existing, test.durationMinutes)) await submitAttemptDocument(existing.id, req.user!.id, true); else throw new ApiError(409, 'An active attempt already exists', 'ACTIVE_ATTEMPT_EXISTS'); } const attempt = await Attempt.create({ userId: req.user!.id, testId: test._id }); const questions = await TestQuestion.find({ testId: test._id }).populate({ path: 'questionId', select: 'questionText options subjectTag topic difficulty defaultMarks negativeMarks' }).sort({ order: 1 }).lean(); return ok(res, { attempt, questions }, 'Attempt started', 201); }
+export async function getAttempt(req: Request, res: Response) { const attempt = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id }); if (!attempt) throw new ApiError(404, 'Attempt not found', 'NOT_FOUND'); const answers = await AttemptAnswer.find({ attemptId: attempt.id }).select('questionId selectedOptions markedForReview timeSpentSeconds isAttempted'); return ok(res, { attempt, answers }); }
+export async function saveAnswer(req: Request, res: Response) { const attempt = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id, status: 'in_progress' }); if (!attempt) throw new ApiError(404, 'Active attempt not found', 'ATTEMPT_NOT_FOUND'); const test = await Test.findById(attempt.testId).lean(); if (!test) throw new ApiError(404, 'Test not found', 'TEST_NOT_FOUND'); if (isExpired(attempt, test.durationMinutes)) { await submitAttemptDocument(attempt.id, req.user!.id, true); throw new ApiError(409, 'Attempt deadline has passed', 'ATTEMPT_EXPIRED'); } const testQuestion = await TestQuestion.findOne({ testId: test._id, questionId: req.body.questionId }).lean(); if (!testQuestion) throw new ApiError(400, 'Question does not belong to this test', 'QUESTION_NOT_IN_TEST'); const question = await Question.findOne({ _id: req.body.questionId, isActive: true }); if (!question) throw new ApiError(404, 'Question not found', 'QUESTION_NOT_FOUND'); const validOptionKeys = new Set(question.options.map(option => option.key)); const selectedOptions = [...new Set((req.body.selectedOptions as string[]).filter((key: string) => validOptionKeys.has(key)))]; if (selectedOptions.length !== (req.body.selectedOptions as string[]).length) throw new ApiError(400, 'One or more selected options are invalid', 'INVALID_OPTIONS'); const scoring = scoreAnswer(selectedOptions, question.correctOptions, testQuestion.marks, question.negativeMarks); const answer = await AttemptAnswer.findOneAndUpdate({ attemptId: attempt.id, questionId: question.id }, { $set: { selectedOptions: scoring.selected, isAttempted: scoring.isAttempted, isCorrect: scoring.isCorrect, markedForReview: req.body.markedForReview, timeSpentSeconds: req.body.timeSpentSeconds, marksObtained: scoring.marksObtained, questionSnapshot: { questionText: question.questionText, options: question.options, correctOptions: question.correctOptions, marks: testQuestion.marks, negativeMarks: question.negativeMarks, topic: question.topic, subjectTag: question.subjectTag } } }, { upsert: true, new: true, setDefaultsOnInsert: true }); return ok(res, answer, 'Answer saved'); }
+async function submitAttemptDocument(attemptId: string, userId: string, autoSubmitted: boolean) { const current = await Attempt.findOne({ _id: attemptId, userId, status: 'in_progress' }); if (!current) return Attempt.findOne({ _id: attemptId, userId }); const test = await Test.findById(current.testId).lean(); if (!test) throw new ApiError(404, 'Test not found', 'TEST_NOT_FOUND'); const calculated = await calculateAttempt(current.id, test._id.toString()); const endTime = new Date(); const timeTakenSeconds = Math.min(Math.max(0, Math.floor((endTime.getTime() - current.startTime.getTime()) / 1000)), test.durationMinutes * 60); const updated = await Attempt.findOneAndUpdate({ _id: current.id, userId, status: 'in_progress' }, { $set: { endTime, totalScore: calculated.score, correctCount: calculated.correct, incorrectCount: calculated.incorrect, unattemptedCount: calculated.unattempted, timeTakenSeconds, sectionResults: calculated.sectionResults, status: autoSubmitted ? 'auto_submitted' : 'completed' } }, { new: true }); return updated ?? Attempt.findOne({ _id: current.id, userId }); }
+export async function submitAttempt(req: Request, res: Response) { const existing = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id }); if (!existing) throw new ApiError(404, 'Attempt not found', 'ATTEMPT_NOT_FOUND'); if (existing.status !== 'in_progress') return ok(res, existing, 'Attempt already submitted'); const test = await Test.findById(existing.testId).lean(); if (!test) throw new ApiError(404, 'Test not found', 'TEST_NOT_FOUND'); const attempt = await submitAttemptDocument(existing.id, req.user!.id, isExpired(existing, test.durationMinutes)); if (!attempt) throw new ApiError(409, 'Unable to submit attempt', 'SUBMISSION_CONFLICT'); return ok(res, attempt, 'Attempt submitted'); }
+export async function result(req: Request, res: Response) { const attempt = await Attempt.findOne({ _id: req.params.id, userId: req.user!.id }); if (!attempt) throw new ApiError(404, 'Attempt not found', 'NOT_FOUND'); if (attempt.status === 'in_progress') throw new ApiError(400, 'Attempt is not submitted yet', 'NOT_SUBMITTED'); const answers = await AttemptAnswer.find({ attemptId: attempt.id }).lean(); const topicMap = new Map<string, { attempted: number; correct: number; score: number }>(); for (const answer of answers) { const topic = answer.questionSnapshot?.topic ?? 'Unknown'; const current = topicMap.get(topic) ?? { attempted: 0, correct: 0, score: 0 }; if (answer.isAttempted) current.attempted += 1; if (answer.isCorrect) current.correct += 1; current.score += answer.marksObtained; topicMap.set(topic, current); } return ok(res, { attempt, accuracy: attempt.correctCount + attempt.incorrectCount ? Number(((attempt.correctCount / (attempt.correctCount + attempt.incorrectCount)) * 100).toFixed(2)) : 0, topics: [...topicMap.entries()].map(([topic, value]) => ({ topic, ...value, accuracy: value.attempted ? Number(((value.correct / value.attempted) * 100).toFixed(2)) : 0 })), answers }); }
