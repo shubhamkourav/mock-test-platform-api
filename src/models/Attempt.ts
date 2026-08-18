@@ -25,5 +25,5 @@ const attemptSchema = new Schema({
 }, { timestamps: true });
 
 attemptSchema.index({ userId: 1, createdAt: -1 });
-attemptSchema.index({ userId: 1, testId: 1, status: 1 });
+attemptSchema.index({ userId: 1, testId: 1, status: 1 }, { unique: true, partialFilterExpression: { status: 'in_progress' } });
 export const Attempt = mongoose.model('Attempt', attemptSchema);

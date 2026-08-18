@@ -1,12 +1,9 @@
-import type { Types } from 'mongoose';
+import type { TokenPayload } from '../utils/jwt';
 
 declare global {
   namespace Express {
     interface Request {
-      user?: {
-        id: string;
-        role: 'student' | 'admin';
-      };
+      user?: { id: string; name: string; email: string; role: TokenPayload['role'] };
     }
   }
 }

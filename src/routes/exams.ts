@@ -11,5 +11,5 @@ router.get('/:id', asyncHandler(controller.getExam));
 router.get('/:id/sections', asyncHandler(controller.listSections));
 router.post('/', authenticate, authorize('admin'), validate(examSchema), asyncHandler(controller.createExam));
 router.patch('/:id', authenticate, authorize('admin'), validate(examSchema.partial()), asyncHandler(controller.updateExam));
-router.post('/:id/sections', authenticate, authorize('admin'), validate(sectionSchema.omit({ examId: true }).extend({ examId: sectionSchema.shape.examId })), asyncHandler(controller.createSection));
+router.post('/:id/sections', authenticate, authorize('admin'), validate(sectionSchema.omit({ examId: true })), asyncHandler(controller.createSection));
 export default router;
