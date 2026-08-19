@@ -107,7 +107,7 @@ describe('phase 1 security and correctness', () => {
     const started = await request(app).post('/api/v1/attempts').set('Authorization', `Bearer ${student.accessToken}`).send({ testId: test.id });
     const attemptId = started.body.data.attempt._id;
     await mongoose.model('Attempt').updateOne({ _id: attemptId }, { $set: { startTime: new Date(Date.now() - 120_000) } });
-    expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: started.body.data.questions[0].questionId._id, selectedOptions: ['a'], markedForReview: false, timeSpentSeconds: 1 })).status).toBe(409);
+    expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: started.body.data.questions[0].questionId, selectedOptions: ['a'], markedForReview: false, timeSpentSeconds: 1 })).status).toBe(409);
     const first = await request(app).post(`/api/v1/attempts/${attemptId}/submit`).set('Authorization', `Bearer ${student.accessToken}`).send({});
     const second = await request(app).post(`/api/v1/attempts/${attemptId}/submit`).set('Authorization', `Bearer ${student.accessToken}`).send({});
     expect(first.status).toBe(200);
