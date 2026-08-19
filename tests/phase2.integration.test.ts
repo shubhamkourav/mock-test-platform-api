@@ -47,6 +47,18 @@ async function createPublishedTest(examId: string, sectionId: string, questions:
   return testId;
 }
 
+function expectStudentAttemptQuestionsToBeSanitized(questions: Array<Record<string, unknown>>) {
+  expect(questions).not.toHaveLength(0);
+  for (const question of questions) {
+    expect(question).toHaveProperty('questionId');
+    expect(question).not.toHaveProperty('correctOptions');
+    expect(question).not.toHaveProperty('isCorrect');
+    expect(question).not.toHaveProperty('marksObtained');
+    expect(question).not.toHaveProperty('questionSnapshot');
+    expect(JSON.stringify(question)).not.toContain('correctOptions');
+  }
+}
+
 describe('phase 2 core API', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
@@ -113,7 +125,26 @@ describe('phase 2 core API', () => {
     const testId = test.body.data._id;
     for (const [index, question] of fixture.questions.entries()) expect((await request(app).post(`/api/v1/tests/${testId}/questions`).set('Authorization', `Bearer ${admin.accessToken}`).send({ questionId: question.id, order: index + 1 })).status).toBe(201);
     expect((await request(app).patch(`/api/v1/tests/${testId}/questions/${fixture.questions[0].id}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ marks: 2 })).status).toBe(200);
-    expect((await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: fixture.questions.map((question, index) => ({ questionId: question.id, order: fixture.questions.length - index })) })).status).toBe(200);
+    const reverse = await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: fixture.questions.map((question, index) => ({ questionId: question.id, order: fixture.questions.length - index })) });
+    expect(reverse.status).toBe(200);
+    expect(reverse.body.data.map((mapping: any) => mapping.questionId)).toEqual([...fixture.questions].reverse().map(question => question.id));
+
+    // Sparse and large existing orders must not collide with the temporary range.
+    expect((await request(app).patch(`/api/v1/tests/${testId}/questions/${fixture.questions[0].id}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ order: 1_000_000 })).status).toBe(200);
+    expect((await request(app).patch(`/api/v1/tests/${testId}/questions/${fixture.questions[1].id}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ order: 5 })).status).toBe(200);
+    const arbitrary = [
+      { questionId: fixture.questions[0].id, order: 1 },
+      { questionId: fixture.questions[1].id, order: 1_000_001 },
+      { questionId: fixture.questions[2].id, order: 50 },
+    ];
+    const reordered = await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: arbitrary });
+    expect(reordered.status).toBe(200);
+    expect(reordered.body.data.map((mapping: any) => [mapping.questionId, mapping.order])).toEqual([
+      [fixture.questions[0].id, 1],
+      [fixture.questions[2].id, 50],
+      [fixture.questions[1].id, 1_000_001],
+    ]);
+    expect((await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: arbitrary })).status).toBe(200);
     expect((await request(app).post(`/api/v1/tests/${testId}/publish`).set('Authorization', `Bearer ${admin.accessToken}`)).status).toBe(200);
     expect((await request(app).patch(`/api/v1/tests/${testId}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ title: 'Should fail' })).status).toBe(409);
     expect((await request(app).post(`/api/v1/tests/${testId}/unpublish`).set('Authorization', `Bearer ${admin.accessToken}`)).status).toBe(200);
@@ -136,11 +167,17 @@ describe('phase 2 core API', () => {
     const testId = await createPublishedTest(fixture.exam.id, fixture.section.id, fixture.questions, admin.accessToken);
     const started = await request(app).post('/api/v1/attempts').set('Authorization', `Bearer ${student.accessToken}`).send({ testId });
     expect(started.status).toBe(201);
+    expectStudentAttemptQuestionsToBeSanitized(started.body.data.questions);
     const attemptId = started.body.data.attempt._id;
     const resumed = await request(app).post('/api/v1/attempts').set('Authorization', `Bearer ${student.accessToken}`).send({ testId });
     expect(resumed.status).toBe(200);
     expect(resumed.body.data.attempt._id).toBe(attemptId);
-    expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: fixture.questions[0].id, selectedOptions: ['a'], markedForReview: false, timeSpentSeconds: 10 })).status).toBe(200);
+    expectStudentAttemptQuestionsToBeSanitized(resumed.body.data.questions);
+    const savedAnswer = await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: fixture.questions[0].id, selectedOptions: ['a'], markedForReview: false, timeSpentSeconds: 10 });
+    expect(savedAnswer.status).toBe(200);
+    expect(savedAnswer.body.data).not.toHaveProperty('isCorrect');
+    expect(savedAnswer.body.data).not.toHaveProperty('marksObtained');
+    expect(savedAnswer.body.data).not.toHaveProperty('questionSnapshot');
     expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: fixture.questions[1].id, selectedOptions: ['a', 'b'], markedForReview: true, timeSpentSeconds: 20 })).status).toBe(200);
     const submit = await request(app).post(`/api/v1/attempts/${attemptId}/submit`).set('Authorization', `Bearer ${student.accessToken}`);
     expect(submit.status).toBe(200);
@@ -183,6 +220,27 @@ describe('phase 2 core API', () => {
     expect((await request(app).post(`/api/v1/tests/${draftId}/questions`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: fixture.questions[0].id, order: 1 })).status).toBe(403);
     expect((await request(app).patch(`/api/v1/questions/${fixture.questions[0].id}`).set('Authorization', `Bearer ${student.accessToken}`).send({ topic: 'bad' })).status).toBe(403);
     expect((await request(app).post('/api/v1/attempts').set('Authorization', `Bearer ${student.accessToken}`).send({ testId: draftId })).status).toBe(404);
+  });
+
+  it('keeps draft tests private while allowing admins to manage them', async () => {
+    const admin = await login('admin@example.com', 'Admin@12345');
+    const student = await login('student@example.com', 'Student@12345');
+    const fixture = await createFixture();
+    const publishedId = await createPublishedTest(fixture.exam.id, fixture.section.id, fixture.questions, admin.accessToken);
+    const draft = await request(app).post('/api/v1/tests').set('Authorization', `Bearer ${admin.accessToken}`).send({ examId: fixture.exam.id, title: 'Admin draft', type: 'full_mock', totalQuestions: 3, totalMarks: 6, durationMinutes: 30, sections: [{ sectionId: fixture.section.id, questionCount: 3, marks: 6, durationMinutes: 30 }] });
+    expect(draft.status).toBe(201);
+    const draftId = draft.body.data._id;
+
+    expect((await request(app).get(`/api/v1/tests/${publishedId}`)).status).toBe(200);
+    expect((await request(app).get(`/api/v1/tests/${draftId}`)).status).toBe(404);
+    expect((await request(app).get('/api/v1/tests')).body.data.map((test: any) => test._id)).toContain(publishedId);
+    expect((await request(app).get('/api/v1/tests?includeUnpublished=true').set('Authorization', `Bearer ${student.accessToken}`)).body.data.map((test: any) => test._id)).not.toContain(draftId);
+    expect((await request(app).get(`/api/v1/tests/${draftId}`).set('Authorization', `Bearer ${student.accessToken}`)).status).toBe(404);
+
+    const adminList = await request(app).get('/api/v1/tests?includeUnpublished=true').set('Authorization', `Bearer ${admin.accessToken}`);
+    expect(adminList.status).toBe(200);
+    expect(adminList.body.data.map((test: any) => test._id)).toContain(draftId);
+    expect((await request(app).get(`/api/v1/tests/${draftId}`).set('Authorization', `Bearer ${admin.accessToken}`)).status).toBe(200);
   });
 
   it('expires attempts server-side and keeps submission idempotent', async () => {

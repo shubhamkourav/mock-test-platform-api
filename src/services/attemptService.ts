@@ -12,7 +12,43 @@ function isExpired(attempt: { startTime: Date }, durationMinutes: number, now = 
 }
 
 async function loadAttemptQuestions(testId: string) {
-  return TestQuestion.find({ testId }).populate({ path: 'questionId', select: 'questionText options subjectTag topic difficulty defaultMarks negativeMarks explanation sectionId' }).sort({ order: 1 }).lean();
+  const mappings = await TestQuestion.find({ testId })
+    .populate({ path: 'questionId', select: 'questionText options subjectTag topic difficulty sectionId' })
+    .sort({ order: 1 })
+    .lean();
+
+  return mappings.map(mapping => {
+    const question = mapping.questionId as unknown as {
+      _id: { toString(): string };
+      questionText: string;
+      options: Array<{ key: string; text: string }>;
+      subjectTag: string;
+      topic: string;
+      difficulty: string;
+      sectionId: { toString(): string };
+    };
+    return {
+      questionId: question._id.toString(),
+      questionText: question.questionText,
+      options: question.options,
+      subjectTag: question.subjectTag,
+      topic: question.topic,
+      difficulty: question.difficulty,
+      sectionId: question.sectionId.toString(),
+      order: mapping.order,
+      marks: mapping.marks,
+    };
+  });
+}
+
+function toStudentAnswer(answer: { questionId: { toString(): string }; selectedOptions: string[]; markedForReview: boolean; timeSpentSeconds: number; isAttempted: boolean }) {
+  return {
+    questionId: answer.questionId.toString(),
+    selectedOptions: answer.selectedOptions,
+    markedForReview: answer.markedForReview,
+    timeSpentSeconds: answer.timeSpentSeconds,
+    isAttempted: answer.isAttempted,
+  };
 }
 
 export async function createAttempt(testId: string, userId: string) {
@@ -71,11 +107,12 @@ export async function saveAnswer(attemptId: string, userId: string, input: { que
   const selectedOptions = [...new Set(input.selectedOptions)];
   if (selectedOptions.some(key => !validOptionKeys.has(key))) throw new ApiError(400, 'One or more selected options are invalid', 'INVALID_OPTIONS');
   const scoring = scoreAnswer(selectedOptions, question.correctOptions, testQuestion.marks, question.negativeMarks);
-  return AttemptAnswer.findOneAndUpdate(
+  const answer = await AttemptAnswer.findOneAndUpdate(
     { attemptId: attempt.id, questionId: question.id },
     { $set: { selectedOptions: scoring.selected, isAttempted: scoring.isAttempted, isCorrect: scoring.isCorrect, markedForReview: input.markedForReview, timeSpentSeconds: input.timeSpentSeconds, marksObtained: scoring.marksObtained, questionSnapshot: { questionText: question.questionText, options: question.options, correctOptions: question.correctOptions, marks: testQuestion.marks, negativeMarks: question.negativeMarks, topic: question.topic, subjectTag: question.subjectTag, explanation: question.explanation } } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
+  return toStudentAnswer(answer);
 }
 
 async function submitAttemptDocument(attemptId: string, userId: string, autoSubmitted: boolean) {

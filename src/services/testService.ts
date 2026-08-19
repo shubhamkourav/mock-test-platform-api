@@ -2,6 +2,7 @@ import { Test } from '../models/Test';
 import { TestQuestion } from '../models/TestQuestion';
 import { Question } from '../models/Question';
 import { Section } from '../models/Section';
+import mongoose, { type ClientSession } from 'mongoose';
 import { ApiError } from '../utils/apiError';
 import { validateTestForPublish, validateTestRelationships } from './testValidation';
 
@@ -90,15 +91,41 @@ export async function deleteQuestionMapping(testId: string, questionId: string) 
 export async function reorderQuestions(testId: string, items: Array<{ questionId: string; order: number }>) {
   const test = await getDraftTest(testId);
   if (test.isPublished) throw new ApiError(409, 'Published tests cannot be modified', 'TEST_ALREADY_PUBLISHED');
-  const existing = await TestQuestion.find({ testId }).lean();
-  if (items.length !== existing.length || new Set(items.map(item => item.questionId)).size !== items.length) throw new ApiError(400, 'Reorder payload must contain every test question exactly once', 'INVALID_REORDER');
-  const existingIds = new Set(existing.map(item => item.questionId.toString()));
-  if (items.some(item => !existingIds.has(item.questionId))) throw new ApiError(400, 'Reorder payload contains an unknown question', 'INVALID_REORDER');
-  const orders = items.map(item => item.order);
-  if (new Set(orders).size !== orders.length || orders.some(order => order < 1 || !Number.isInteger(order))) throw new ApiError(400, 'Question orders must be unique positive integers', 'INVALID_REORDER');
-  await TestQuestion.bulkWrite(existing.map(item => ({ updateOne: { filter: { _id: item._id }, update: { $set: { order: item.order + existing.length } } } })));
-  await TestQuestion.bulkWrite(items.map(item => ({ updateOne: { filter: { testId, questionId: item.questionId }, update: { $set: { order: item.order } } } })));
-  return TestQuestion.find({ testId }).sort({ order: 1 }).lean();
+
+  async function applyReorder(session?: ClientSession) {
+    const query = TestQuestion.find({ testId }).sort({ _id: 1 });
+    if (session) query.session(session);
+    const existing = await query.lean();
+    if (items.length !== existing.length || new Set(items.map(item => item.questionId)).size !== items.length) throw new ApiError(400, 'Reorder payload must contain every test question exactly once', 'INVALID_REORDER');
+    const existingIds = new Set(existing.map(item => item.questionId.toString()));
+    if (items.some(item => !existingIds.has(item.questionId))) throw new ApiError(400, 'Reorder payload contains an unknown question', 'INVALID_REORDER');
+    const orders = items.map(item => item.order);
+    if (new Set(orders).size !== orders.length || orders.some(order => order < 1 || !Number.isInteger(order))) throw new ApiError(400, 'Question orders must be unique positive integers', 'INVALID_REORDER');
+
+    // Persisted orders are positive. Negative temporary values are therefore a
+    // disjoint, collision-free range even when existing orders are sparse or huge.
+    await TestQuestion.bulkWrite(existing.map((item, index) => ({
+      updateOne: { filter: { _id: item._id }, update: { $set: { order: -(index + 1) } } },
+    })), { session });
+    await TestQuestion.bulkWrite(items.map(item => ({
+      updateOne: { filter: { testId, questionId: item.questionId }, update: { $set: { order: item.order } } },
+    })), { session });
+    return TestQuestion.find({ testId }).sort({ order: 1 }).session(session ?? null).lean();
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    let reordered: Awaited<ReturnType<typeof applyReorder>> | undefined;
+    await session.withTransaction(async () => { reordered = await applyReorder(session); });
+    return reordered!;
+  } catch (error) {
+    // MongoDB standalone deployments do not support transactions. The same
+    // collision-safe two-phase update remains correct for a single writer there.
+    if (error instanceof Error && /Transaction numbers are only allowed/.test(error.message)) return applyReorder();
+    throw error;
+  } finally {
+    await session.endSession();
+  }
 }
 
 export async function publishTest(id: string) {
