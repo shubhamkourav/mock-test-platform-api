@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { objectId } from './common';
 
 export const examSchema = z.object({
   name: z.string().min(2).max(150),
@@ -10,7 +11,7 @@ export const examSchema = z.object({
 });
 
 export const sectionSchema = z.object({
-  examId: z.string(),
+  examId: objectId,
   stage: z.string().default('prelims'),
   name: z.string().min(2),
   slug: z.string().min(2),
