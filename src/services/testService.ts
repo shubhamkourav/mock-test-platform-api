@@ -11,6 +11,14 @@ async function getDraftTest(id: string) {
   return test;
 }
 
+function relationshipInput(input: Record<string, any>) {
+  return {
+    examId: String(input.examId),
+    sectionId: input.sectionId ? String(input.sectionId) : undefined,
+    sections: (input.sections ?? []).map((section: any) => ({ sectionId: String(section.sectionId) })),
+  };
+}
+
 export async function listTests(query: Record<string, unknown>, includeUnpublished = false) {
   const filter: Record<string, unknown> = includeUnpublished ? {} : { isPublished: true };
   if (query.examId) filter.examId = query.examId;
@@ -26,14 +34,14 @@ export async function getTest(id: string, includeUnpublished = false) {
 }
 
 export async function createTest(input: Record<string, any>, createdBy: string) {
-  await validateTestRelationships(input);
+  await validateTestRelationships(relationshipInput(input));
   return Test.create({ ...input, isPublished: false, createdBy });
 }
 
 export async function updateTest(id: string, input: Record<string, any>) {
   const test = await getDraftTest(id);
   if (test.isPublished) throw new ApiError(409, 'Published tests cannot be modified', 'TEST_ALREADY_PUBLISHED');
-  await validateTestRelationships({ ...test.toObject(), ...input });
+  await validateTestRelationships(relationshipInput({ ...test.toObject(), ...input }));
   const updated = await Test.findByIdAndUpdate(id, input, { new: true, runValidators: true });
   if (!updated) throw new ApiError(404, 'Test not found', 'TEST_NOT_FOUND');
   return updated;
