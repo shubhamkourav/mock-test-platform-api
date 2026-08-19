@@ -14,7 +14,7 @@ export async function getAttemptResult(attemptId: string, userId: string) {
   const [test, answers, mappings] = await Promise.all([
     Test.findById(attempt.testId).select('title totalMarks durationMinutes').lean(),
     AttemptAnswer.find({ attemptId }).lean(),
-    TestQuestion.find({ testId: attempt.testId }).populate({ path: 'questionId', select: 'explanation topic subjectTag options questionText' }).sort({ order: 1 }).lean(),
+    TestQuestion.find({ testId: attempt.testId }).populate({ path: 'questionId', select: 'explanation topic subjectTag options questionText correctOptions' }).sort({ order: 1 }).lean(),
   ]);
   if (!test) throw new ApiError(404, 'Test not found', 'TEST_NOT_FOUND');
   const answerMap = new Map(answers.map(answer => [answer.questionId.toString(), answer]));
@@ -30,15 +30,15 @@ export async function getAttemptResult(attemptId: string, userId: string) {
     topicMap.set(topic, current);
   }
   const review = mappings.map(mapping => {
-    const questionId = mapping.questionId?._id?.toString?.() ?? mapping.questionId.toString();
+    const populatedQuestion = mapping.questionId as any;
+    const questionId = populatedQuestion?._id ? String(populatedQuestion._id) : String(mapping.questionId);
     const answer = answerMap.get(questionId);
-    const question = typeof mapping.questionId === 'object' ? mapping.questionId as any : undefined;
     return {
       questionId,
-      questionText: answer?.questionSnapshot?.questionText ?? question?.questionText,
-      options: answer?.questionSnapshot?.options ?? question?.options ?? [],
+      questionText: answer?.questionSnapshot?.questionText ?? populatedQuestion?.questionText,
+      options: answer?.questionSnapshot?.options ?? populatedQuestion?.options ?? [],
       selectedOptions: answer?.selectedOptions ?? [],
-      correctOptions: answer?.questionSnapshot?.correctOptions ?? [],
+      correctOptions: answer?.questionSnapshot?.correctOptions ?? populatedQuestion?.correctOptions ?? [],
       isAttempted: answer?.isAttempted ?? false,
       isCorrect: answer?.isCorrect ?? false,
       markedForReview: answer?.markedForReview ?? false,
@@ -46,9 +46,9 @@ export async function getAttemptResult(attemptId: string, userId: string) {
       negativeMarks: answer?.questionSnapshot?.negativeMarks ?? 0,
       marksObtained: answer?.marksObtained ?? 0,
       timeSpentSeconds: answer?.timeSpentSeconds ?? 0,
-      topic: answer?.questionSnapshot?.topic ?? question?.topic,
-      subjectTag: answer?.questionSnapshot?.subjectTag ?? question?.subjectTag,
-      explanation: answer?.questionSnapshot?.explanation ?? question?.explanation,
+      topic: answer?.questionSnapshot?.topic ?? populatedQuestion?.topic,
+      subjectTag: answer?.questionSnapshot?.subjectTag ?? populatedQuestion?.subjectTag,
+      explanation: answer?.questionSnapshot?.explanation ?? populatedQuestion?.explanation,
     };
   });
   return {

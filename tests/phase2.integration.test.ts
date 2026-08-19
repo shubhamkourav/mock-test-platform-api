@@ -35,15 +35,7 @@ async function createFixture() {
 }
 
 async function createPublishedTest(examId: string, sectionId: string, questions: Array<{ id: string }>, adminToken: string, title = `Test ${Date.now()}`) {
-  const create = await request(app).post('/api/v1/tests').set('Authorization', `Bearer ${adminToken}`).send({
-    examId,
-    title,
-    type: 'full_mock',
-    totalQuestions: 3,
-    totalMarks: 6,
-    durationMinutes: 30,
-    sections: [{ sectionId, questionCount: 3, marks: 6, durationMinutes: 30 }],
-  });
+  const create = await request(app).post('/api/v1/tests').set('Authorization', `Bearer ${adminToken}`).send({ examId, title, type: 'full_mock', totalQuestions: 3, totalMarks: 6, durationMinutes: 30, sections: [{ sectionId, questionCount: 3, marks: 6, durationMinutes: 30 }] });
   expect(create.status).toBe(201);
   const testId = create.body.data._id;
   for (const [index, question] of questions.entries()) {
@@ -74,16 +66,11 @@ describe('phase 2 core API', () => {
     ({ AttemptAnswer } = await import('../src/models/AttemptAnswer'));
     ({ RefreshToken } = await import('../src/models/RefreshToken'));
   });
-
   beforeEach(async () => {
-    await Promise.all([
-      User.deleteMany({}), Exam.deleteMany({}), Section.deleteMany({}), Question.deleteMany({}), Test.deleteMany({}),
-      TestQuestion.deleteMany({}), Attempt.deleteMany({}), AttemptAnswer.deleteMany({}), RefreshToken.deleteMany({}),
-    ]);
+    await Promise.all([User.deleteMany({}), Exam.deleteMany({}), Section.deleteMany({}), Question.deleteMany({}), Test.deleteMany({}), TestQuestion.deleteMany({}), Attempt.deleteMany({}), AttemptAnswer.deleteMany({}), RefreshToken.deleteMany({})]);
     await User.create({ name: 'Admin', email: 'admin@example.com', passwordHash: await bcrypt.hash('Admin@12345', 12), role: 'admin' });
     await User.create({ name: 'Student', email: 'student@example.com', passwordHash: await bcrypt.hash('Student@12345', 12), role: 'student' });
   });
-
   afterAll(async () => { await mongoose.disconnect(); await mongo.stop(); });
 
   it('supports complete exam and section management with authorization', async () => {
@@ -96,6 +83,8 @@ describe('phase 2 core API', () => {
     expect((await request(app).post(`/api/v1/exams/${examId}/sections`).set('Authorization', `Bearer ${admin.accessToken}`).send({ name: 'Quant', slug: 'quant', subjectTag: 'Quant', questionCount: 1, timeMinutes: 10, maxMarks: 2 })).status).toBe(201);
     const section = (await request(app).get(`/api/v1/exams/${examId}/sections`)).body.data[0];
     expect((await request(app).patch(`/api/v1/sections/${section._id}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ name: 'Quantitative' })).status).toBe(200);
+    const emptySection = (await request(app).post(`/api/v1/exams/${examId}/sections`).set('Authorization', `Bearer ${admin.accessToken}`).send({ name: 'Empty', slug: 'empty', subjectTag: 'Empty', questionCount: 1, timeMinutes: 5, maxMarks: 1 })).body.data;
+    expect((await request(app).delete(`/api/v1/sections/${emptySection._id}`).set('Authorization', `Bearer ${admin.accessToken}`)).status).toBe(200);
     expect((await request(app).post('/api/v1/exams').set('Authorization', `Bearer ${student.accessToken}`).send({ name: 'Forbidden', slug: 'forbidden', category: 'Test' })).status).toBe(403);
     expect((await request(app).patch(`/api/v1/sections/${section._id}`).set('Authorization', `Bearer ${student.accessToken}`).send({ name: 'Forbidden' })).status).toBe(403);
   });
@@ -103,10 +92,8 @@ describe('phase 2 core API', () => {
   it('soft-deactivates questions and supports question filtering and validation', async () => {
     const admin = await login('admin@example.com', 'Admin@12345');
     const fixture = await createFixture();
-    const duplicate = await request(app).post('/api/v1/questions').set('Authorization', `Bearer ${admin.accessToken}`).send({ examId: fixture.exam.id, sectionId: fixture.section.id, subjectTag: 'General', topic: 'x', questionText: 'bad', options: [{ key: 'a', text: 'a' }, { key: 'a', text: 'b' }], correctOptions: ['a'] });
-    expect(duplicate.status).toBe(400);
-    const invalidCorrect = await request(app).post('/api/v1/questions').set('Authorization', `Bearer ${admin.accessToken}`).send({ examId: fixture.exam.id, sectionId: fixture.section.id, subjectTag: 'General', topic: 'x', questionText: 'bad', options: [{ key: 'a', text: 'a' }, { key: 'b', text: 'b' }], correctOptions: ['c'] });
-    expect(invalidCorrect.status).toBe(400);
+    expect((await request(app).post('/api/v1/questions').set('Authorization', `Bearer ${admin.accessToken}`).send({ examId: fixture.exam.id, sectionId: fixture.section.id, subjectTag: 'General', topic: 'x', questionText: 'bad', options: [{ key: 'a', text: 'a' }, { key: 'a', text: 'b' }], correctOptions: ['a'] })).status).toBe(400);
+    expect((await request(app).post('/api/v1/questions').set('Authorization', `Bearer ${admin.accessToken}`).send({ examId: fixture.exam.id, sectionId: fixture.section.id, subjectTag: 'General', topic: 'x', questionText: 'bad', options: [{ key: 'a', text: 'a' }, { key: 'b', text: 'b' }], correctOptions: ['c'] })).status).toBe(400);
     const list = await request(app).get(`/api/v1/questions?examId=${fixture.exam.id}&difficulty=medium&page=1&limit=2`);
     expect(list.status).toBe(200);
     expect(list.body.data.pagination.limit).toBe(2);
@@ -124,12 +111,9 @@ describe('phase 2 core API', () => {
     const test = await request(app).post('/api/v1/tests').set('Authorization', `Bearer ${admin.accessToken}`).send({ examId: fixture.exam.id, title: 'Builder test', type: 'full_mock', totalQuestions: 3, totalMarks: 6, durationMinutes: 30, sections: [{ sectionId: fixture.section.id, questionCount: 3, marks: 6, durationMinutes: 30 }] });
     expect(test.status).toBe(201);
     const testId = test.body.data._id;
-    for (const [index, question] of fixture.questions.entries()) {
-      expect((await request(app).post(`/api/v1/tests/${testId}/questions`).set('Authorization', `Bearer ${admin.accessToken}`).send({ questionId: question.id, order: index + 1 })).status).toBe(201);
-    }
+    for (const [index, question] of fixture.questions.entries()) expect((await request(app).post(`/api/v1/tests/${testId}/questions`).set('Authorization', `Bearer ${admin.accessToken}`).send({ questionId: question.id, order: index + 1 })).status).toBe(201);
     expect((await request(app).patch(`/api/v1/tests/${testId}/questions/${fixture.questions[0].id}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ marks: 2 })).status).toBe(200);
-    const reorder = await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: fixture.questions.map((question, index) => ({ questionId: question.id, order: fixture.questions.length - index })) });
-    expect(reorder.status).toBe(200);
+    expect((await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: fixture.questions.map((question, index) => ({ questionId: question.id, order: fixture.questions.length - index })) })).status).toBe(200);
     expect((await request(app).post(`/api/v1/tests/${testId}/publish`).set('Authorization', `Bearer ${admin.accessToken}`)).status).toBe(200);
     expect((await request(app).patch(`/api/v1/tests/${testId}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ title: 'Should fail' })).status).toBe(409);
     expect((await request(app).post(`/api/v1/tests/${testId}/unpublish`).set('Authorization', `Bearer ${admin.accessToken}`)).status).toBe(200);
@@ -150,24 +134,19 @@ describe('phase 2 core API', () => {
     const student = await login('student@example.com', 'Student@12345');
     const fixture = await createFixture();
     const testId = await createPublishedTest(fixture.exam.id, fixture.section.id, fixture.questions, admin.accessToken);
-
     const started = await request(app).post('/api/v1/attempts').set('Authorization', `Bearer ${student.accessToken}`).send({ testId });
     expect(started.status).toBe(201);
     const attemptId = started.body.data.attempt._id;
     const resumed = await request(app).post('/api/v1/attempts').set('Authorization', `Bearer ${student.accessToken}`).send({ testId });
     expect(resumed.status).toBe(200);
     expect(resumed.body.data.attempt._id).toBe(attemptId);
-
-    const q1 = fixture.questions[0];
-    const q2 = fixture.questions[1];
-    expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: q1.id, selectedOptions: ['a'], markedForReview: false, timeSpentSeconds: 10 })).status).toBe(200);
-    expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: q2.id, selectedOptions: ['a', 'b'], markedForReview: true, timeSpentSeconds: 20 })).status).toBe(200);
+    expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: fixture.questions[0].id, selectedOptions: ['a'], markedForReview: false, timeSpentSeconds: 10 })).status).toBe(200);
+    expect((await request(app).post(`/api/v1/attempts/${attemptId}/answers`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: fixture.questions[1].id, selectedOptions: ['a', 'b'], markedForReview: true, timeSpentSeconds: 20 })).status).toBe(200);
     const submit = await request(app).post(`/api/v1/attempts/${attemptId}/submit`).set('Authorization', `Bearer ${student.accessToken}`);
     expect(submit.status).toBe(200);
     expect(submit.body.data.totalScore).toBe(5);
     expect(submit.body.data.correctCount).toBe(2);
     expect(submit.body.data.unattemptedCount).toBe(1);
-
     const result = await request(app).get(`/api/v1/attempts/${attemptId}/result`).set('Authorization', `Bearer ${student.accessToken}`);
     expect(result.status).toBe(200);
     expect(result.body.data.score).toBe(5);
@@ -176,7 +155,7 @@ describe('phase 2 core API', () => {
     expect(result.body.data.accuracy).toBe(100);
     expect(result.body.data.review).toHaveLength(3);
     expect(result.body.data.review.some((item: any) => item.questionId === fixture.questions[2].id && item.isAttempted === false)).toBe(true);
-    expect(result.body.data.review.find((item: any) => item.questionId === q2.id).correctOptions).toEqual(['a', 'b']);
+    expect(result.body.data.review.find((item: any) => item.questionId === fixture.questions[1].id).correctOptions).toEqual(['a', 'b']);
   });
 
   it('applies negative marking and rejects cross-student attempt/result access', async () => {
@@ -203,7 +182,7 @@ describe('phase 2 core API', () => {
     const draftId = draft.body.data._id;
     expect((await request(app).post(`/api/v1/tests/${draftId}/questions`).set('Authorization', `Bearer ${student.accessToken}`).send({ questionId: fixture.questions[0].id, order: 1 })).status).toBe(403);
     expect((await request(app).patch(`/api/v1/questions/${fixture.questions[0].id}`).set('Authorization', `Bearer ${student.accessToken}`).send({ topic: 'bad' })).status).toBe(403);
-    expect((await request(app).post(`/api/v1/attempts`).set('Authorization', `Bearer ${student.accessToken}`).send({ testId: draftId })).status).toBe(404);
+    expect((await request(app).post('/api/v1/attempts').set('Authorization', `Bearer ${student.accessToken}`).send({ testId: draftId })).status).toBe(404);
   });
 
   it('expires attempts server-side and keeps submission idempotent', async () => {
