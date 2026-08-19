@@ -7,6 +7,7 @@ import swaggerUi from 'swagger-ui-express';
 import { env } from './config/env';
 import authRoutes from './routes/auth';
 import examRoutes from './routes/exams';
+import sectionRoutes from './routes/sections';
 import questionRoutes from './routes/questions';
 import testRoutes from './routes/tests';
 import attemptRoutes from './routes/attempts';
@@ -28,6 +29,7 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/exams', examRoutes);
+app.use('/api/v1/sections', sectionRoutes);
 app.use('/api/v1/questions', questionRoutes);
 app.use('/api/v1/tests', testRoutes);
 app.use('/api/v1/attempts', attemptRoutes);

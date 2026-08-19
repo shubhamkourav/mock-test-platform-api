@@ -1,17 +1,16 @@
 import { z } from 'zod';
+import { objectId } from './common';
 
-const option = z.object({
-  key: z.string().min(1),
-  text: z.string().min(1),
-});
+const option = z.object({ key: z.string().min(1).max(20), text: z.string().min(1) });
 
 export const questionSchema = z.object({
-  sectionId: z.string(),
+  examId: objectId.optional(),
+  sectionId: objectId,
   subjectTag: z.string().min(1),
   topic: z.string().min(1),
   questionText: z.string().min(1),
   options: z.array(option).min(2).max(10),
-  correctOptions: z.array(z.string()).min(1),
+  correctOptions: z.array(z.string().min(1)).min(1),
   explanation: z.string().optional(),
   defaultMarks: z.number().nonnegative().default(1),
   negativeMarks: z.number().nonnegative().default(0),

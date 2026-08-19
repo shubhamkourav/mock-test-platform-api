@@ -10,4 +10,5 @@ router.get('/', asyncHandler(controller.listQuestions));
 router.get('/:id', asyncHandler(controller.getQuestion));
 router.post('/', authenticate, authorize('admin'), validate(questionSchema), asyncHandler(controller.createQuestion));
 router.patch('/:id', authenticate, authorize('admin'), validate(questionSchema.partial()), asyncHandler(controller.updateQuestion));
+router.delete('/:id', authenticate, authorize('admin'), asyncHandler(controller.deleteQuestion));
 export default router;

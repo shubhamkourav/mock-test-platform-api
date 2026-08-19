@@ -1,9 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 
-const snapshotOptionSchema = new Schema({
-  key: String,
-  text: String,
-}, { _id: false });
+const snapshotOptionSchema = new Schema({ key: String, text: String }, { _id: false });
 
 const schema = new Schema({
   attemptId: { type: Schema.Types.ObjectId, ref: 'Attempt', required: true, index: true },
@@ -22,6 +19,7 @@ const schema = new Schema({
     negativeMarks: Number,
     topic: String,
     subjectTag: String,
+    explanation: String,
   },
 }, { timestamps: true });
 
