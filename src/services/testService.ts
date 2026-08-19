@@ -47,6 +47,7 @@ export async function addQuestion(testId: string, input: { questionId: string; s
   const section = await Section.findOne({ _id: question.sectionId, examId: test.examId, isActive: true }).lean();
   if (!section) throw new ApiError(400, 'Question does not belong to the test exam', 'INVALID_QUESTION_RELATIONSHIP');
   if (input.sectionId && String(input.sectionId) !== String(question.sectionId)) throw new ApiError(400, 'Test question section does not match question section', 'INVALID_TEST_QUESTION_RELATIONSHIP');
+  if (input.marks !== undefined && input.marks < 0) throw new ApiError(400, 'Test question marks cannot be negative', 'INVALID_TEST_MARKS');
   const duplicate = await TestQuestion.findOne({ testId, questionId: input.questionId }).lean();
   if (duplicate) throw new ApiError(409, 'Question is already in the test', 'DUPLICATE_TEST_QUESTION');
   return TestQuestion.create({ testId, questionId: question._id, sectionId: question.sectionId, order: input.order, marks: input.marks ?? question.defaultMarks });
@@ -62,6 +63,7 @@ export async function updateQuestionMapping(testId: string, questionId: string, 
   const sectionId = input.sectionId ?? mapping.sectionId ?? question.sectionId;
   const section = await Section.findOne({ _id: sectionId, examId: test.examId, isActive: true }).lean();
   if (!section || String(question.sectionId) !== String(section._id)) throw new ApiError(400, 'Test question section is invalid', 'INVALID_TEST_QUESTION_RELATIONSHIP');
+  if (input.marks !== undefined && input.marks < 0) throw new ApiError(400, 'Test question marks cannot be negative', 'INVALID_TEST_MARKS');
   mapping.sectionId = section._id;
   if (input.order !== undefined) mapping.order = input.order;
   if (input.marks !== undefined) mapping.marks = input.marks;
@@ -81,13 +83,12 @@ export async function reorderQuestions(testId: string, items: Array<{ questionId
   const test = await getDraftTest(testId);
   if (test.isPublished) throw new ApiError(409, 'Published tests cannot be modified', 'TEST_ALREADY_PUBLISHED');
   const existing = await TestQuestion.find({ testId }).lean();
-  if (items.length !== existing.length || new Set(items.map(item => item.questionId)).size !== items.length) {
-    throw new ApiError(400, 'Reorder payload must contain every test question exactly once', 'INVALID_REORDER');
-  }
+  if (items.length !== existing.length || new Set(items.map(item => item.questionId)).size !== items.length) throw new ApiError(400, 'Reorder payload must contain every test question exactly once', 'INVALID_REORDER');
   const existingIds = new Set(existing.map(item => item.questionId.toString()));
   if (items.some(item => !existingIds.has(item.questionId))) throw new ApiError(400, 'Reorder payload contains an unknown question', 'INVALID_REORDER');
   const orders = items.map(item => item.order);
   if (new Set(orders).size !== orders.length || orders.some(order => order < 1 || !Number.isInteger(order))) throw new ApiError(400, 'Question orders must be unique positive integers', 'INVALID_REORDER');
+  await TestQuestion.bulkWrite(existing.map(item => ({ updateOne: { filter: { _id: item._id }, update: { $set: { order: item.order + existing.length } } } })));
   await TestQuestion.bulkWrite(items.map(item => ({ updateOne: { filter: { testId, questionId: item.questionId }, update: { $set: { order: item.order } } } })));
   return TestQuestion.find({ testId }).sort({ order: 1 }).lean();
 }
