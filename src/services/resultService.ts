@@ -14,7 +14,7 @@ export async function getAttemptResult(attemptId: string, userId: string) {
   const [test, answers, mappings] = await Promise.all([
     Test.findById(attempt.testId).select('title totalMarks durationMinutes').lean(),
     AttemptAnswer.find({ attemptId }).lean(),
-    TestQuestion.find({ testId: attempt.testId }).populate({ path: 'questionId', select: 'explanation topic subjectTag options questionText correctOptions' }).sort({ order: 1 }).lean(),
+    TestQuestion.find({ testId: attempt.testId }).populate({ path: 'questionId', select: 'explanation topic subjectTag options questionText correctOptions selectionMode' }).sort({ order: 1 }).lean(),
   ]);
   if (!test) throw new ApiError(404, 'Test not found', 'TEST_NOT_FOUND');
   const answerMap = new Map(answers.map(answer => [answer.questionId.toString(), answer]));
@@ -37,6 +37,7 @@ export async function getAttemptResult(attemptId: string, userId: string) {
       questionId,
       questionText: answer?.questionSnapshot?.questionText ?? populatedQuestion?.questionText,
       options: answer?.questionSnapshot?.options ?? populatedQuestion?.options ?? [],
+      selectionMode: populatedQuestion?.selectionMode ?? 'single',
       selectedOptions: answer?.selectedOptions ?? [],
       correctOptions: answer?.questionSnapshot?.correctOptions ?? populatedQuestion?.correctOptions ?? [],
       isAttempted: answer?.isAttempted ?? false,
