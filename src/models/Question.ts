@@ -12,6 +12,7 @@ const questionSchema = new Schema({
   questionText: { type: String, required: true },
   options: { type: [optionSchema], default: [] },
   correctOptions: { type: [String], required: true },
+  selectionMode: { type: String, enum: ['single', 'multiple'], default: 'single', required: true },
   explanation: String,
   defaultMarks: { type: Number, default: 1, min: 0 },
   negativeMarks: { type: Number, default: 0, min: 0 },

@@ -13,7 +13,7 @@ function isExpired(attempt: { startTime: Date }, durationMinutes: number, now = 
 
 async function loadAttemptQuestions(testId: string) {
   const mappings = await TestQuestion.find({ testId })
-    .populate({ path: 'questionId', select: 'questionText options subjectTag topic difficulty sectionId' })
+    .populate({ path: 'questionId', select: 'questionText options selectionMode subjectTag topic difficulty sectionId' })
     .sort({ order: 1 })
     .lean();
 
@@ -22,6 +22,7 @@ async function loadAttemptQuestions(testId: string) {
       _id: { toString(): string };
       questionText: string;
       options: Array<{ key: string; text: string }>;
+      selectionMode?: 'single' | 'multiple';
       subjectTag: string;
       topic: string;
       difficulty: string;
@@ -31,6 +32,7 @@ async function loadAttemptQuestions(testId: string) {
       questionId: question._id.toString(),
       questionText: question.questionText,
       options: question.options,
+      selectionMode: question.selectionMode ?? 'single',
       subjectTag: question.subjectTag,
       topic: question.topic,
       difficulty: question.difficulty,
