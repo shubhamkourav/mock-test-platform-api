@@ -11,6 +11,7 @@ export const questionSchema = z.object({
   questionText: z.string().min(1),
   options: z.array(option).min(2).max(10),
   correctOptions: z.array(z.string().min(1)).min(1),
+  selectionMode: z.enum(['single', 'multiple']).default('single'),
   explanation: z.string().optional(),
   defaultMarks: z.number().nonnegative().default(1),
   negativeMarks: z.number().nonnegative().default(0),
