@@ -43,6 +43,22 @@ async function loadAttemptQuestions(testId: string) {
   });
 }
 
+function toStudentActiveAttempt(attempt: {
+  _id: { toString(): string };
+  userId: { toString(): string };
+  testId: { toString(): string };
+  startTime: Date;
+  status: string;
+}) {
+  return {
+    _id: attempt._id.toString(),
+    userId: attempt.userId.toString(),
+    testId: attempt.testId.toString(),
+    startTime: attempt.startTime,
+    status: attempt.status,
+  };
+}
+
 function toStudentAnswer(answer: { questionId: { toString(): string }; selectedOptions: string[]; markedForReview: boolean; timeSpentSeconds: number; isAttempted: boolean }) {
   return {
     questionId: answer.questionId.toString(),
@@ -63,7 +79,7 @@ export async function createAttempt(testId: string, userId: string) {
   const existing = await Attempt.findOne({ userId, testId: test._id, status: 'in_progress' });
   if (existing) {
     if (test.settings?.allowResume !== false && !isExpired(existing, test.durationMinutes)) {
-      return { attempt: existing, questions: await loadAttemptQuestions(test.id), resumed: true };
+      return { attempt: toStudentActiveAttempt(existing), questions: await loadAttemptQuestions(test.id), resumed: true };
     }
     if (isExpired(existing, test.durationMinutes)) {
       await submitAttemptDocument(existing.id, userId, true);
@@ -75,21 +91,21 @@ export async function createAttempt(testId: string, userId: string) {
   let attempt;
   try {
     attempt = await Attempt.create({ userId, testId: test._id });
-  } catch (error: any) {
-    if (error?.code === 11000) {
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && error.code === 11000) {
       const active = await Attempt.findOne({ userId, testId: test._id, status: 'in_progress' });
-      if (active && test.settings?.allowResume !== false && !isExpired(active, test.durationMinutes)) return { attempt: active, questions: await loadAttemptQuestions(test.id), resumed: true };
+      if (active && test.settings?.allowResume !== false && !isExpired(active, test.durationMinutes)) return { attempt: toStudentActiveAttempt(active), questions: await loadAttemptQuestions(test.id), resumed: true };
     }
     throw error;
   }
-  return { attempt, questions: await loadAttemptQuestions(test.id), resumed: false };
+  return { attempt: toStudentActiveAttempt(attempt), questions: await loadAttemptQuestions(test.id), resumed: false };
 }
 
 export async function getAttempt(id: string, userId: string) {
   const attempt = await Attempt.findOne({ _id: id, userId });
   if (!attempt) throw new ApiError(404, 'Attempt not found', 'ATTEMPT_NOT_FOUND');
   const answers = await AttemptAnswer.find({ attemptId: attempt.id }).select('questionId selectedOptions markedForReview timeSpentSeconds isAttempted').lean();
-  return { attempt, answers };
+  return { attempt: toStudentActiveAttempt(attempt), answers: answers.map(toStudentAnswer) };
 }
 
 export async function saveAnswer(attemptId: string, userId: string, input: { questionId: string; selectedOptions: string[]; markedForReview: boolean; timeSpentSeconds: number }) {
