@@ -17,7 +17,7 @@ function assertOptions(options: Array<{ key: string; text: string }>, correctOpt
   if (correctOptions.some(key => !keys.includes(key))) throw new ApiError(400, 'Correct answers must reference valid option keys', 'INVALID_QUESTION_OPTIONS');
 }
 
-export async function listQuestions(query: Record<string, unknown>) {
+export async function listQuestions(query: Record<string, unknown>, isAdmin = false) {
   const page = Math.max(Number(query.page ?? 1) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit ?? 20) || 20, 1), 100);
   const filter: Record<string, unknown> = {};
@@ -32,8 +32,11 @@ export async function listQuestions(query: Record<string, unknown>) {
   if (query.active !== undefined) {
     const value = String(query.active).toLowerCase();
     if (!['true', 'false'].includes(value)) throw new ApiError(400, 'active must be true or false', 'INVALID_ACTIVE_FILTER');
+    if (value === 'false' && !isAdmin) throw new ApiError(403, 'You do not have permission', 'FORBIDDEN');
     filter.isActive = value === 'true';
-  } else filter.isActive = true;
+  } else {
+    filter.isActive = true;
+  }
   if (query.examId || query.exam) {
     const sections = await Section.find({ examId: String(query.examId ?? query.exam) }).select('_id').lean();
     if (!sections.length) return { items: [], pagination: { page, limit, total: 0, pages: 0 } };
