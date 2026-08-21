@@ -108,6 +108,9 @@ export async function saveAnswer(attemptId: string, userId: string, input: { que
   const validOptionKeys = new Set(question.options.map(option => option.key));
   const selectedOptions = [...new Set(input.selectedOptions)];
   if (selectedOptions.some(key => !validOptionKeys.has(key))) throw new ApiError(400, 'One or more selected options are invalid', 'INVALID_OPTIONS');
+  if (question.selectionMode === 'single' && selectedOptions.length > 1) {
+    throw new ApiError(400, 'Single-selection questions allow only one selected option', 'INVALID_SELECTION_MODE');
+  }
   const scoring = scoreAnswer(selectedOptions, question.correctOptions, testQuestion.marks, question.negativeMarks);
   const answer = await AttemptAnswer.findOneAndUpdate(
     { attemptId: attempt.id, questionId: question.id },

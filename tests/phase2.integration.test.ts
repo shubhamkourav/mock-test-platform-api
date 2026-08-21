@@ -27,9 +27,9 @@ async function createFixture() {
   const exam = await Exam.create({ name: `Phase 2 Exam ${Date.now()}`, slug: `phase-2-${Date.now()}`, category: 'Test' });
   const section = await Section.create({ examId: exam.id, name: 'General', slug: `general-${Date.now()}`, subjectTag: 'General', questionCount: 3, timeMinutes: 30, maxMarks: 6, negativeMarking: 1 });
   const questions = await Question.create([
-    { sectionId: section.id, subjectTag: 'General', topic: 'Arithmetic', questionText: '2 + 2 = ?', options: [{ key: 'a', text: '4' }, { key: 'b', text: '5' }], correctOptions: ['a'], defaultMarks: 2, negativeMarks: 0.5 },
-    { sectionId: section.id, subjectTag: 'General', topic: 'Logic', questionText: 'Select prime numbers', options: [{ key: 'a', text: '2' }, { key: 'b', text: '3' }, { key: 'c', text: '4' }], correctOptions: ['a', 'b'], defaultMarks: 3, negativeMarks: 1 },
-    { sectionId: section.id, subjectTag: 'General', topic: 'General', questionText: 'Capital of India?', options: [{ key: 'a', text: 'Delhi' }, { key: 'b', text: 'Mumbai' }], correctOptions: ['a'], defaultMarks: 1, negativeMarks: 0 },
+    { sectionId: section.id, subjectTag: 'General', topic: 'Arithmetic', questionText: '2 + 2 = ?', options: [{ key: 'a', text: '4' }, { key: 'b', text: '5' }], correctOptions: ['a'], selectionMode: 'single', defaultMarks: 2, negativeMarks: 0.5 },
+    { sectionId: section.id, subjectTag: 'General', topic: 'Logic', questionText: 'Select prime numbers', options: [{ key: 'a', text: '2' }, { key: 'b', text: '3' }, { key: 'c', text: '4' }], correctOptions: ['a', 'b'], selectionMode: 'multiple', defaultMarks: 3, negativeMarks: 1 },
+    { sectionId: section.id, subjectTag: 'General', topic: 'General', questionText: 'Capital of India?', options: [{ key: 'a', text: 'Delhi' }, { key: 'b', text: 'Mumbai' }], correctOptions: ['a'], selectionMode: 'single', defaultMarks: 1, negativeMarks: 0 },
   ]);
   return { admin, exam, section, questions };
 }
@@ -128,22 +128,12 @@ describe('phase 2 core API', () => {
     const reverse = await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: fixture.questions.map((question, index) => ({ questionId: question.id, order: fixture.questions.length - index })) });
     expect(reverse.status).toBe(200);
     expect(reverse.body.data.map((mapping: any) => mapping.questionId)).toEqual([...fixture.questions].reverse().map(question => question.id));
-
-    // Sparse and large existing orders must not collide with the temporary range.
     expect((await request(app).patch(`/api/v1/tests/${testId}/questions/${fixture.questions[0].id}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ order: 1_000_000 })).status).toBe(200);
     expect((await request(app).patch(`/api/v1/tests/${testId}/questions/${fixture.questions[1].id}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ order: 5 })).status).toBe(200);
-    const arbitrary = [
-      { questionId: fixture.questions[0].id, order: 1 },
-      { questionId: fixture.questions[1].id, order: 1_000_001 },
-      { questionId: fixture.questions[2].id, order: 50 },
-    ];
+    const arbitrary = [{ questionId: fixture.questions[0].id, order: 1 }, { questionId: fixture.questions[1].id, order: 1_000_001 }, { questionId: fixture.questions[2].id, order: 50 }];
     const reordered = await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: arbitrary });
     expect(reordered.status).toBe(200);
-    expect(reordered.body.data.map((mapping: any) => [mapping.questionId, mapping.order])).toEqual([
-      [fixture.questions[0].id, 1],
-      [fixture.questions[2].id, 50],
-      [fixture.questions[1].id, 1_000_001],
-    ]);
+    expect(reordered.body.data.map((mapping: any) => [mapping.questionId, mapping.order])).toEqual([[fixture.questions[0].id, 1], [fixture.questions[2].id, 50], [fixture.questions[1].id, 1_000_001]]);
     expect((await request(app).post(`/api/v1/tests/${testId}/reorder`).set('Authorization', `Bearer ${admin.accessToken}`).send({ items: arbitrary })).status).toBe(200);
     expect((await request(app).post(`/api/v1/tests/${testId}/publish`).set('Authorization', `Bearer ${admin.accessToken}`)).status).toBe(200);
     expect((await request(app).patch(`/api/v1/tests/${testId}`).set('Authorization', `Bearer ${admin.accessToken}`).send({ title: 'Should fail' })).status).toBe(409);
@@ -230,13 +220,11 @@ describe('phase 2 core API', () => {
     const draft = await request(app).post('/api/v1/tests').set('Authorization', `Bearer ${admin.accessToken}`).send({ examId: fixture.exam.id, title: 'Admin draft', type: 'full_mock', totalQuestions: 3, totalMarks: 6, durationMinutes: 30, sections: [{ sectionId: fixture.section.id, questionCount: 3, marks: 6, durationMinutes: 30 }] });
     expect(draft.status).toBe(201);
     const draftId = draft.body.data._id;
-
     expect((await request(app).get(`/api/v1/tests/${publishedId}`)).status).toBe(200);
     expect((await request(app).get(`/api/v1/tests/${draftId}`)).status).toBe(404);
     expect((await request(app).get('/api/v1/tests')).body.data.map((test: any) => test._id)).toContain(publishedId);
     expect((await request(app).get('/api/v1/tests?includeUnpublished=true').set('Authorization', `Bearer ${student.accessToken}`)).body.data.map((test: any) => test._id)).not.toContain(draftId);
     expect((await request(app).get(`/api/v1/tests/${draftId}`).set('Authorization', `Bearer ${student.accessToken}`)).status).toBe(404);
-
     const adminList = await request(app).get('/api/v1/tests?includeUnpublished=true').set('Authorization', `Bearer ${admin.accessToken}`);
     expect(adminList.status).toBe(200);
     expect(adminList.body.data.map((test: any) => test._id)).toContain(draftId);
