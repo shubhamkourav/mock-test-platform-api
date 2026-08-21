@@ -11,6 +11,7 @@ import sectionRoutes from './routes/sections';
 import questionRoutes from './routes/questions';
 import testRoutes from './routes/tests';
 import attemptRoutes from './routes/attempts';
+import { optionalAuthenticate } from './middleware/auth';
 import { errorHandler } from './middleware/errorHandler';
 import { swaggerSpec } from './docs/swagger';
 
@@ -28,9 +29,9 @@ app.get('/health', (_req, res) => res.json({ success: true, status: 'ok', servic
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/exams', examRoutes);
+app.use('/api/v1/exams', optionalAuthenticate, examRoutes);
 app.use('/api/v1/sections', sectionRoutes);
-app.use('/api/v1/questions', questionRoutes);
+app.use('/api/v1/questions', optionalAuthenticate, questionRoutes);
 app.use('/api/v1/tests', testRoutes);
 app.use('/api/v1/attempts', attemptRoutes);
 
